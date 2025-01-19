@@ -79,6 +79,7 @@ def preprocess_rfcc(df_rfcc: pd.DataFrame) -> pd.DataFrame:
     df_rfcc["Biopsy"] = pd.Categorical(
         df_rfcc["Biopsy"], categories=[0, 1], ordered=True
     ).rename_categories(["Healthy", "Cancer"])
+    df_rfcc["IUD"] = df_rfcc["IUD"].astype(float)
     df_rfcc = df_rfcc[
         [
             "Age",
@@ -100,12 +101,11 @@ def preprocess_rfcc(df_rfcc: pd.DataFrame) -> pd.DataFrame:
         ]
     ]
     # Impute missing values using the most frequent value (mode)
+    df_rfcc = df_rfcc.replace("?", np.nan)
     imputer = SimpleImputer(strategy="most_frequent")
-    df_rfcc_imputed = imputer.fit_transform(
-        df_rfcc.drop("Biopsy", axis=1)
-    )  # Fit SimpleImputer on numerical data only
+    df_rfcc.iloc[:, :-1] = imputer.fit_transform(df_rfcc.iloc[:, :-1])
     df_rfcc_imputed = pd.DataFrame(
-        df_rfcc_imputed, columns=df_rfcc.columns[:-1]
+        df_rfcc, columns=df_rfcc.columns[:-1]
     )  # Drop target column from output
     df_rfcc = pd.concat([df_rfcc_imputed, df_rfcc["Biopsy"]], axis=1)
     return df_rfcc
