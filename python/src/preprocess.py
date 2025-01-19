@@ -79,7 +79,6 @@ def preprocess_rfcc(df_rfcc: pd.DataFrame) -> pd.DataFrame:
     df_rfcc["Biopsy"] = pd.Categorical(
         df_rfcc["Biopsy"], categories=[0, 1], ordered=True
     ).rename_categories(["Healthy", "Cancer"])
-    df_rfcc["IUD"] = df_rfcc["IUD"].astype(float)
     df_rfcc = df_rfcc[
         [
             "Age",
