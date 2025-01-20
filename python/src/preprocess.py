@@ -5,26 +5,26 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 
 
-def preprocess_bike_data(df_bike: pd.DataFrame) -> pd.DataFrame:
+def preprocess_bike_data(df: pd.DataFrame) -> pd.DataFrame:
     """Preprocesses the bike sharing dataset."""
 
-    df_bike["weekday"] = pd.Categorical(
-        df_bike["weekday"], categories=range(7), ordered=True
+    df["weekday"] = pd.Categorical(
+        df["weekday"], categories=range(7), ordered=True
     ).rename_categories(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"])
-    df_bike["holiday"] = pd.Categorical(
-        df_bike["holiday"], categories=[0, 1], ordered=True
+    df["holiday"] = pd.Categorical(
+        df["holiday"], categories=[0, 1], ordered=True
     ).rename_categories(["NO HOLIDAY", "HOLIDAY"])
-    df_bike["workingday"] = pd.Categorical(
-        df_bike["workingday"], categories=[0, 1], ordered=True
+    df["workingday"] = pd.Categorical(
+        df["workingday"], categories=[0, 1], ordered=True
     ).rename_categories(["NO WORKING DAY", "WORKING DAY"])
-    df_bike["season"] = pd.Categorical(
-        df_bike["season"], categories=range(1, 5), ordered=True
+    df["season"] = pd.Categorical(
+        df["season"], categories=range(1, 5), ordered=True
     ).rename_categories(["WINTER", "SPRING", "SUMMER", "FALL"])
-    df_bike["weathersit"] = pd.Categorical(
-        df_bike["weathersit"], categories=range(1, 4), ordered=True
+    df["weathersit"] = pd.Categorical(
+        df["weathersit"], categories=range(1, 4), ordered=True
     ).rename_categories(["GOOD", "MISTY", "RAIN/SNOW/STORM"])
-    df_bike["mnth"] = pd.Categorical(
-        df_bike["mnth"], categories=range(1, 13), ordered=True
+    df["mnth"] = pd.Categorical(
+        df["mnth"], categories=range(1, 13), ordered=True
     ).rename_categories(
         [
             "JAN",
@@ -42,19 +42,19 @@ def preprocess_bike_data(df_bike: pd.DataFrame) -> pd.DataFrame:
         ]
     )
 
-    df_bike["yr"] = np.where(df_bike["yr"] == 0, 2011, 2012)
-    df_bike["yr"] = pd.Categorical(df_bike["yr"])
-    df_bike["dteday"] = pd.to_datetime(df_bike["dteday"])
-    df_bike["days_since_2011"] = (df_bike["dteday"] - df_bike["dteday"].min()).dt.days
-    df_bike["temp"] = df_bike["temp"] * (39 - (-8)) + (-8)
-    df_bike["atemp"] = df_bike["atemp"] * (50 - (16)) + (16)
-    df_bike["windspeed"] = 67 * df_bike["windspeed"]
-    df_bike["hum"] = 100 * df_bike["hum"]
+    df["yr"] = np.where(df["yr"] == 0, 2011, 2012)
+    df["yr"] = pd.Categorical(df["yr"])
+    df["dteday"] = pd.to_datetime(df["dteday"])
+    df["days_since_2011"] = (df["dteday"] - df["dteday"].min()).dt.days
+    df["temp"] = df["temp"] * (39 - (-8)) + (-8)
+    df["atemp"] = df["atemp"] * (50 - (16)) + (16)
+    df["windspeed"] = 67 * df["windspeed"]
+    df["hum"] = 100 * df["hum"]
 
-    return df_bike.drop(columns=["instant", "dteday", "registered", "casual", "atemp"])
+    return df.drop(columns=["instant", "dteday", "registered", "casual", "atemp"])
 
 
-def preprocess_ycomments(df_ycomments: pd.DataFrame) -> pd.DataFrame:
+def preprocess_ycomments(df: pd.DataFrame) -> pd.DataFrame:
     """Preprocesses the YouTube Spam Comments dataset."""
 
     def _clean_ycomments(html_string: str) -> str:
@@ -62,24 +62,21 @@ def preprocess_ycomments(df_ycomments: pd.DataFrame) -> pd.DataFrame:
             return html_string
         return re.sub("<.*?>", "", html_string)
 
-    df_ycomments["CONTENT"] = df_ycomments["CONTENT"].apply(_clean_ycomments)
+    df["CONTENT"] = df["CONTENT"].apply(_clean_ycomments)
     # Convert to ASCII
-    df_ycomments["CONTENT"] = (
-        df_ycomments["CONTENT"]
-        .astype(str)
-        .str.encode("ascii", "ignore")
-        .str.decode("ascii")
+    df["CONTENT"] = (
+        df["CONTENT"].astype(str).str.encode("ascii", "ignore").str.decode("ascii")
     )
-    return df_ycomments
+    return df
 
 
-def preprocess_rfcc(df_rfcc: pd.DataFrame) -> pd.DataFrame:
+def preprocess_rfcc(df: pd.DataFrame) -> pd.DataFrame:
     """Preprocesses the Risk Factors for Cervical Cancer dataset."""
-    df_rfcc = df_rfcc.drop(columns=["Citology", "Schiller", "Hinselmann"])
-    df_rfcc["Biopsy"] = pd.Categorical(
-        df_rfcc["Biopsy"], categories=[0, 1], ordered=True
+    df = df.drop(columns=["Citology", "Schiller", "Hinselmann"])
+    df["Biopsy"] = pd.Categorical(
+        df["Biopsy"], categories=[0, 1], ordered=True
     ).rename_categories(["Healthy", "Cancer"])
-    df_rfcc = df_rfcc[
+    df = df[
         [
             "Age",
             "Number of sexual partners",
@@ -100,11 +97,11 @@ def preprocess_rfcc(df_rfcc: pd.DataFrame) -> pd.DataFrame:
         ]
     ]
     # Impute missing values using the most frequent value (mode)
-    df_rfcc = df_rfcc.replace("?", np.nan)
+    df = df.replace("?", np.nan)
     imputer = SimpleImputer(strategy="most_frequent")
-    df_rfcc.iloc[:, :-1] = imputer.fit_transform(df_rfcc.iloc[:, :-1])
-    df_rfcc_imputed = pd.DataFrame(
-        df_rfcc, columns=df_rfcc.columns[:-1]
+    df.iloc[:, :-1] = imputer.fit_transform(df.iloc[:, :-1])
+    df_imputed = pd.DataFrame(
+        df, columns=df.columns[:-1]
     )  # Drop target column from output
-    df_rfcc = pd.concat([df_rfcc_imputed, df_rfcc["Biopsy"]], axis=1)
-    return df_rfcc
+    df = pd.concat([df_imputed, df["Biopsy"]], axis=1)
+    return df
