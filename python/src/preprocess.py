@@ -103,5 +103,6 @@ def preprocess_rfcc(df: pd.DataFrame) -> pd.DataFrame:
     df_imputed = pd.DataFrame(
         df, columns=df.columns[:-1]
     )  # Drop target column from output
+    df_imputed = df_imputed.astype(float)
     df = pd.concat([df_imputed, df["Biopsy"]], axis=1)
     return df
