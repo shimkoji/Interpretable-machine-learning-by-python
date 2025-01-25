@@ -255,3 +255,107 @@ class IndividualConditionalExpectation(PartialDependence):
         fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
 
         fig.show()
+
+
+class AccumulatedLocalEffects(PartialDependence):
+    """Accumulated Local Effects Plot(ALE)"""
+
+    def accumulated_local_effects(
+        self, j: int, n_grid: int = 30
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """ALEを求める
+
+        Args:
+            j: ALEを計算したい特徴量のインデックス
+            n_grid: グリッドを何分割するか
+        Returns:
+            特徴量の値とその場合のALE
+        """
+
+        # ターゲットの変数を、取りうる値の最大値から最小値まで動かせるようにする
+        xjks = np.quantile(self.X.iloc[:, j], q=np.arange(0, 1, 1 / n_grid))
+
+        # 区間ごとに両端での予測値の平均的な差分を求める
+        local_effects = np.zeros(n_grid)
+        for k in range(1, n_grid):
+            mask = (self.X.iloc[:, j] >= xjks[k - 1]) & (self.X.iloc[:, j] <= xjks[k])
+            local_effects[k] = self._predict_average(
+                self.X[mask], j, xjks[k]
+            ) - self._predict_average(self.X[mask], j, xjks[k - 1])
+
+        accumulated_local_effects = np.cumsum(local_effects)
+
+        # return (xjks, accumulated_local_effects)
+        return pd.DataFrame({"x": xjks, "ale": accumulated_local_effects})
+
+    def _predict_average(self, X: pd.DataFrame, j: int, xj: float) -> np.ndarray:
+        """特徴量の値を置き換えて予測を行い、結果を平均する
+
+        Args:
+            j: 値を置き換える特徴量のインデックス
+            xj: 置き換える値
+        """
+
+        # 特徴量の値を置き換える際、元データが上書きされないようコピー
+        # 特徴量の値を置き換えて予測し、平均をとって返す
+        X_replaced = X.copy()
+        X_replaced.iloc[:, j] = xj
+
+        return self.model.predict(X_replaced).mean()
+
+    def plot_ale(self, ylim: list[float] | None = None) -> None:
+        """ALEを可視化
+
+        Args:
+            ylim: Y軸の範囲。特に指定しなければiceの範囲となる。
+        """
+
+        fig, ax = plt.subplots()
+        # ICEの線
+        # sns.lineplot(
+        #     self.target_var_name,
+        #     self.df_ice["ice"],
+        #     units="instance",
+        #     data=self.df_ice,
+        #     lw=0.8,
+        #     alpha=0.5,
+        #     estimator=None,
+        #     zorder=1,  # zorderを指定することで、線が背面、点が前面にくるようにする
+        #     ax=ax,
+        # )
+        sns.lineplot(
+            x=self.target_var_name,  # Correct: string representing column name
+            y="ice_diff",  # Correct: string representing column name
+            units="instance",  # Correct: string representing column name
+            data=self.df_ice,  # Crucial: provide the DataFrame
+            lw=0.8,
+            alpha=0.5,
+            estimator=None,
+            zorder=1,
+            ax=ax,
+        )
+        # 平均値の計算とプロット
+        # average_ice = (
+        #     self.df_ice.groupby(self.target_var_name)["ice_diff"].mean().reset_index()
+        # )
+        # sns.lineplot(
+        #     x=self.target_var_name,
+        #     y="ice_diff",
+        #     data=average_ice,
+        #     color="yellow",
+        #     lw=5,
+        #     ax=ax,
+        #     # label="Average ICE",  # 凡例用にラベルを追加
+        # )
+        # インスタンスからの実際の予測値を点でプロットしておく
+        # sns.scatterplot(
+        #     x=self.target_var_name,
+        #     y="prediction",
+        #     data=self.df_instance,
+        #     zorder=2,
+        #     ax=ax,
+        # )
+        ax.set(xlabel=self.target_var_name, ylabel="Prediction", ylim=ylim)
+        fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
+
+        fig.show()
