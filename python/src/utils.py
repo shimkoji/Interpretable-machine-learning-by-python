@@ -1,11 +1,70 @@
-from typing import Literal
+from itertools import product
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from joblib import Parallel, delayed
+
+# class PartialDependence:
+#     def __init__(
+#         self,
+#         model,
+#         X: pd.DataFrame,
+#         var_names: list[str],
+#         pred_type: Literal["regression", "classification"],
+#     ):
+#         """
+#         Initializes the PartialDependence object.
+
+#         Args:
+#             model: Trained scikit-learn model.
+#             X: pandas DataFrame used for training (must be a DataFrame).
+#             var_names: List of feature names for partial dependence calculation.
+#         """
+#         self.model = model
+#         self.X = X.copy()
+#         self.var_names = var_names
+#         self.pred_type = pred_type
+
+#     def partial_dependence(self, var_name, n_grid=50):
+#         """
+#         Calculates the partial dependence for a given variable.
+
+#         Args:
+#             var_name: Name of the variable.
+#             n_grid: Number of grid points.
+
+#         Returns:
+#             A tuple containing the grid points and the average predictions.
+#         """
+
+#         if isinstance(self.X, pd.DataFrame):  # Check if it's a DataFrame
+#             value_range = np.linspace(
+#                 self.X[var_name].min(), self.X[var_name].max(), num=n_grid
+#             )
+
+#         else:
+#             raise TypeError("X must be a pandas DataFrame.")
+
+#         average_prediction = np.array(
+#             [self._counterfactual_prediction(var_name, x).mean() for x in value_range]
+#         )
+
+#         return pd.DataFrame(
+#             data={var_name: value_range, "avg_pred": average_prediction}
+#         )
+
+#     def _counterfactual_prediction(self, var_name, grid_point):
+#         X_counterfactual = self.X.copy()
+#         X_counterfactual[var_name] = grid_point
 
 
+#         if self.pred_type == "regression":
+#             return self.model.predict(X_counterfactual)
+#         else:
+#             return self.model.predict_proba(X_counterfactual)[:, 1]
 class PartialDependence:
     def __init__(
         self,
@@ -19,45 +78,62 @@ class PartialDependence:
 
         Args:
             model: Trained scikit-learn model.
-            X: pandas DataFrame used for training (must be a DataFrame).
-            var_names: List of feature names for partial dependence calculation.
+            X: pandas DataFrame used for training.
+            var_names: List of feature names.
+            pred_type: Type of prediction ("regression" or "classification").
         """
         self.model = model
         self.X = X.copy()
         self.var_names = var_names
         self.pred_type = pred_type
 
-    def partial_dependence(self, var_name, n_grid=50):
+    def partial_dependence(self, var_names=None, n_grid=50):
         """
-        Calculates the partial dependence for a given variable.
+        Calculates the partial dependence for given variables.
 
         Args:
-            var_name: Name of the variable.
-            n_grid: Number of grid points.
+            var_names: List of variable names. If None, uses all variables specified during initialization.
+            n_grid: Number of grid points per variable.
 
         Returns:
-            A tuple containing the grid points and the average predictions.
+            A pandas DataFrame containing the grid points and average predictions.
         """
 
-        if isinstance(self.X, pd.DataFrame):  # Check if it's a DataFrame
-            value_range = np.linspace(
+        if not isinstance(self.X, pd.DataFrame):
+            raise TypeError("X must be a pandas DataFrame.")
+
+        if var_names is None:
+            var_names = self.var_names
+        elif isinstance(var_names, str):  #  handle single string input
+            var_names = [var_names]
+
+        grid_ranges = {}
+        for var_name in var_names:
+            grid_ranges[var_name] = np.linspace(
                 self.X[var_name].min(), self.X[var_name].max(), num=n_grid
             )
 
-        else:
-            raise TypeError("X must be a pandas DataFrame.")
+        grid_points = list(
+            product(*grid_ranges.values())
+        )  # Cartesian product for all variables
+        grid_points_df = pd.DataFrame(grid_points, columns=var_names)
 
-        average_prediction = np.array(
-            [self._counterfactual_prediction(var_name, x).mean() for x in value_range]
-        )
+        average_predictions = []
+        for _, row in grid_points_df.iterrows():
+            average_predictions.append(self._counterfactual_prediction(row).mean())
 
-        return pd.DataFrame(
-            data={var_name: value_range, "avg_pred": average_prediction}
-        )
+        grid_points_df["avg_pred"] = average_predictions
+        return grid_points_df
 
-    def _counterfactual_prediction(self, var_name, grid_point):
+    def _counterfactual_prediction(self, grid_point_series):
+        """Makes counterfactual predictions."""
+
         X_counterfactual = self.X.copy()
-        X_counterfactual[var_name] = grid_point
+        for (
+            var_name,
+            grid_point,
+        ) in grid_point_series.items():  # Iterate through variables
+            X_counterfactual[var_name] = grid_point
 
         if self.pred_type == "regression":
             return self.model.predict(X_counterfactual)
@@ -359,3 +435,120 @@ class AccumulatedLocalEffects(PartialDependence):
         fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
 
         fig.show()
+
+
+class PermutationFeatureImportance:
+    def __init__(
+        self,
+        model: Any,
+        X: pd.DataFrame,
+        y: pd.DataFrame,
+        var_names: list[str],
+        metric: Any,
+        pred_type: Literal["regression", "classification"],
+    ):
+        self.model = model
+        self.X = X
+        self.y = y
+        self.var_names = var_names
+        self.metric = metric
+        self.pred_type = pred_type
+        if self.pred_type == "regression":
+            self.baseline = self.metric(self.y, self.model.predict(self.X))
+        elif hasattr(self.model, "predict_proba"):  # Check if predict_proba exists
+            self.baseline = self.metric(self.y, self.model.predict_proba(self.X)[:, 1])
+        else:
+            raise AttributeError("Model does not have 'predict_proba' method.")
+
+    def _permutation_metrics(
+        self, idx_to_permute: int, X_permuted: pd.DataFrame
+    ) -> float:
+        """ある特徴量の値をシャッフルしたときの予測精度を求める
+
+        Args:
+            idx_to_permute: シャッフルする特徴量のインデックス
+        """
+
+        # 特徴量の値をシャッフルして予測
+        X_permuted.iloc[:, idx_to_permute] = np.random.permutation(
+            X_permuted.iloc[:, idx_to_permute]
+        )
+        if self.pred_type == "regression":
+            y_pred = self.model.predict(X_permuted)
+        else:
+            y_pred = self.model.predict_proba(X_permuted)[:, 1]
+
+        return self.metric(self.y, y_pred)
+
+    def permutation_feature_importance(
+        self, n_shuffle: int = 10, n_jobs: int = -1
+    ) -> None:
+        """PFIを求める
+
+        Args:
+            n_shuffle: シャッフルの回数。多いほど値が安定する。デフォルトは10回
+        """
+
+        J = self.X.shape[1]  # 特徴量の数
+
+        # J個の特徴量に対してPFIを求めたい
+        # R回シャッフルを繰り返して平均をとることで値を安定させている
+        # metrics_permuted = [
+        #     float(np.mean([self._permutation_metrics(j) for r in range(n_shuffle)]))
+        #     for j in range(J)
+        # ]
+
+        results = []
+        for j in range(J):
+            # シャッフルする際に、元の特徴量が上書きされないよう用にコピーしておく
+            X_permuted = self.X.copy()
+
+            # 特徴量の値をシャッフル
+            X_permuted.iloc[:, j] = np.random.permutation(X_permuted.iloc[:, j])
+
+            # 並列処理でメトリクス計算
+            metrics_permuted = Parallel(n_jobs=n_jobs)(
+                delayed(self._permutation_metrics)(j, X_permuted)
+                for _ in range(n_shuffle)
+            )
+            results.append(np.mean(metrics_permuted))
+        # データフレームとしてまとめる
+        # シャッフルでどのくらい予測精度が落ちるかは、
+        # 差(difference)と比率(ratio)の2種類を用意する
+        df_feature_importance = pd.DataFrame(
+            data={
+                "var_name": self.var_names,
+                "permutation": results,
+            }
+        )
+        df_feature_importance["baseline"] = self.baseline
+        df_feature_importance["difference"] = (
+            df_feature_importance["permutation"] - df_feature_importance["baseline"]
+        )
+        df_feature_importance["ratio"] = (
+            df_feature_importance["permutation"] / df_feature_importance["baseline"]
+        )
+
+        self.feature_importance = df_feature_importance.sort_values(
+            "permutation", ascending=False
+        )
+
+    # def plot(self, importance_type: str = "difference") -> None:
+    #     """PFIを可視化
+
+    #     Args:
+    #         importance_type: PFIを差(difference)と比率(ratio)のどちらで計算するか
+    #     """
+
+    #     fig, ax = plt.subplots()
+    #     ax.barh(
+    #         self.feature_importance["var_name"],
+    #         self.feature_importance[importance_type],
+    #         label=f"baseline: {self.baseline:.2f}",
+    #     )
+    #     ax.set(xlabel=importance_type, ylabel=None)
+    #     ax.invert_yaxis()  # 重要度が高い順に並び替える
+    #     ax.legend(loc="lower right")
+    #     fig.suptitle(f"Permutationによる特徴量の重要度({importance_type})")
+
+    #     fig.show()
