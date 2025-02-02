@@ -63,7 +63,6 @@ def preprocess_ycomments(df: pd.DataFrame) -> pd.DataFrame:
         return re.sub("<.*?>", "", html_string)
 
     df["CONTENT"] = df["CONTENT"].apply(_clean_ycomments)
-    # Convert to ASCII
     df["CONTENT"] = (
         df["CONTENT"].astype(str).str.encode("ascii", "ignore").str.decode("ascii")
     )
@@ -100,9 +99,7 @@ def preprocess_rfcc(df: pd.DataFrame) -> pd.DataFrame:
     df = df.replace("?", np.nan)
     imputer = SimpleImputer(strategy="most_frequent")
     df.iloc[:, :-1] = imputer.fit_transform(df.iloc[:, :-1])
-    df_imputed = pd.DataFrame(
-        df, columns=df.columns[:-1]
-    )  # Drop target column from output
+    df_imputed = pd.DataFrame(df, columns=df.columns[:-1])
     df_imputed = df_imputed.astype(float)
     df = pd.concat([df_imputed, df["Biopsy"]], axis=1)
     return df
