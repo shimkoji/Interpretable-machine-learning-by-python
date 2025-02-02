@@ -11,7 +11,7 @@ from joblib import Parallel, delayed
 class PartialDependence:
     def __init__(
         self,
-        model,
+        model: Any,
         X: pd.DataFrame,
         var_names: list[str],
         pred_type: Literal["regression", "classification"],
@@ -60,7 +60,7 @@ class PartialDependence:
         grid_points_df["avg_pred"] = average_predictions
         return grid_points_df
 
-    def _counterfactual_prediction(self, grid_point_series):
+    def _counterfactual_prediction(self, grid_point_series: dict[str:float]):
         """Makes counterfactual predictions."""
 
         X_counterfactual = self.X.copy()
@@ -130,7 +130,12 @@ class IndividualConditionalExpectation(PartialDependence):
             .loc[:, ["instance", "prediction"] + self.var_names]
         )
 
-    def plot(self, fig=None, ax=None, ylim: Union[List[float], None] = None) -> None:
+    def plot(
+        self,
+        fig: Any,
+        ax: Any = None,
+        ylim: Union[List[float], None] = None,
+    ) -> None:
         """Visualizes ICE plots.
 
         Args:
@@ -155,7 +160,7 @@ class IndividualConditionalExpectation(PartialDependence):
         fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
 
     def plot_cice(
-        self, fig=None, ax=None, ylim: Union[List[float], None] = None
+        self, fig: Any = None, ax: Any = None, ylim: Union[List[float], None] = None
     ) -> None:
         """Visualizes ICE (Individual Conditional Expectation) plots.
 
@@ -197,7 +202,7 @@ class AccumulatedLocalEffects:
 
     def __init__(
         self,
-        model,
+        model: Any,
         X: pd.DataFrame,
     ):
         """
@@ -278,16 +283,16 @@ class PermutationFeatureImportance:
         model: Any,
         X: pd.DataFrame,
         y: pd.DataFrame,
-        var_names: list[str],
         metric: Any,
         pred_type: Literal["regression", "classification"],
     ):
         self.model = model
-        self.X = X
+        self.X = X.copy()
         self.y = y
-        self.var_names = var_names
+        self.var_names = list(X.columns)
         self.metric = metric
         self.pred_type = pred_type
+
         if self.pred_type == "regression":
             self.baseline = self.metric(self.y, self.model.predict(self.X))
         elif hasattr(self.model, "predict_proba"):
@@ -295,59 +300,42 @@ class PermutationFeatureImportance:
         else:
             raise AttributeError("Model does not have 'predict_proba' method.")
 
-    def _permutation_metrics(
-        self, idx_to_permute: int, X_permuted: pd.DataFrame
-    ) -> float:
-        """Calculates prediction accuracy after shuffling the values of a specific feature.
-
-        Args:
-            idx_to_permute: The index of the feature whose values will be shuffled.
-        """
-
+    def _permutation_metrics(self, idx_to_permute: int) -> float:
+        X_permuted = self.X.copy()
         X_permuted.iloc[:, idx_to_permute] = np.random.permutation(
             X_permuted.iloc[:, idx_to_permute]
         )
+
         if self.pred_type == "regression":
             y_pred = self.model.predict(X_permuted)
         else:
             y_pred = self.model.predict_proba(X_permuted)[:, 1]
-
         return self.metric(self.y, y_pred)
 
-    def permutation_feature_importance(
-        self, n_shuffle: int = 10, n_jobs: int = -1
-    ) -> None:
-        """Calculates Permutation Feature Importance (PFI).
-
-        Args:
-            n_shuffle: The number of times to shuffle the feature values.  Higher values generally lead to more stable results. Defaults to 10.
-        """
-
+    def permutation_feature_importance(self, n_shuffle=10, n_jobs=-1) -> pd.DataFrame:
         J = self.X.shape[1]
-
         results = []
         for j in range(J):
-            X_permuted = self.X.copy()
-            X_permuted.iloc[:, j] = np.random.permutation(X_permuted.iloc[:, j])
             metrics_permuted = Parallel(n_jobs=n_jobs)(
-                delayed(self._permutation_metrics)(j, X_permuted)
-                for _ in range(n_shuffle)
+                delayed(self._permutation_metrics)(j) for _ in range(n_shuffle)
             )
-            results.append(np.mean(metrics_permuted))
-        df_feature_importance = pd.DataFrame(
-            data={
-                "var_name": self.var_names,
-                "permutation": results,
-            }
-        )
+            results.append(metrics_permuted)
+
+        df_feature_importance = pd.DataFrame({"var_name": self.var_names})
+        df_feature_importance["permutation_mean"] = np.mean(results, axis=1)
+        df_feature_importance["permutation_max"] = np.max(results, axis=1)
+        df_feature_importance["permutation_min"] = np.min(results, axis=1)
+        df_feature_importance["permutation_std"] = np.std(results, axis=1)
         df_feature_importance["baseline"] = self.baseline
-        df_feature_importance["difference"] = (
-            df_feature_importance["permutation"] - df_feature_importance["baseline"]
+        df_feature_importance["diff"] = (
+            df_feature_importance["permutation_mean"]
+            - df_feature_importance["baseline"]
         )
         df_feature_importance["ratio"] = (
-            df_feature_importance["permutation"] / df_feature_importance["baseline"]
+            (df_feature_importance["diff"]) / df_feature_importance["baseline"]
         )
 
-        self.feature_importance = df_feature_importance.sort_values(
-            "permutation", ascending=False
+        df_feature_importance_sorted = df_feature_importance.sort_values(
+            "ratio", ascending=True
         )
+        return df_feature_importance_sorted
