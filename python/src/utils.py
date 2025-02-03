@@ -132,7 +132,7 @@ class IndividualConditionalExpectation(PartialDependence):
 
     def plot(
         self,
-        fig: Any,
+        fig: Any = None,
         ax: Any = None,
         ylim: Union[List[float], None] = None,
     ) -> None:
