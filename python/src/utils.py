@@ -9,6 +9,8 @@ from joblib import Parallel, delayed
 
 
 class PartialDependence:
+    """Partial Dependence"""
+
     def __init__(
         self,
         model: Any,
@@ -130,7 +132,7 @@ class IndividualConditionalExpectation(PartialDependence):
             .loc[:, ["instance", "prediction"] + self.var_names]
         )
 
-    def plot(
+    def plot_ice(
         self,
         fig: Any = None,
         ax: Any = None,
@@ -159,7 +161,7 @@ class IndividualConditionalExpectation(PartialDependence):
         ax.grid(color="gray", linestyle="--", linewidth=0.5, alpha=0.5)
         fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
 
-    def plot_cice(
+    def plot_ice_with_average(
         self, fig: Any = None, ax: Any = None, ylim: Union[List[float], None] = None
     ) -> None:
         """Visualizes ICE (Individual Conditional Expectation) plots.
@@ -198,86 +200,87 @@ class IndividualConditionalExpectation(PartialDependence):
 
 
 class AccumulatedLocalEffects:
-    """Accumulated Local Effects Plot(ALE)"""
+    """Accumulated Local Effects"""
 
-    def __init__(
-        self,
-        model: Any,
-        X: pd.DataFrame,
-    ):
+    def __init__(self, model: Any, X: pd.DataFrame):
         """
-        Initializes the PartialDependence object.
+        Initializes the AccumulatedLocalEffects object.
 
         Args:
-            model: Trained scikit-learn model.
-            X: pandas DataFrame used for training.
+            model: The trained model.  Should have a `predict` method.
+            X: The dataset used for training the model. Should be a Pandas DataFrame.
         """
         self.model = model
         self.X = X.copy()
 
     def accumulated_local_effects(
         self, var_name: str, n_grid: int = 30
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Calculates Accumulated Local Effects (ALE).
+    ) -> pd.DataFrame:
+        """
+        Calculates the Accumulated Local Effects (ALE) for a given feature.
 
         Args:
-            var_name: Name of the feature for which to compute ALE.
-            n_grid: Number of intervals to divide the feature range into.
+            var_name: The name of the feature to calculate ALE for.
+            n_grid: The number of intervals to divide the feature range into.
 
         Returns:
-            A tuple containing:
-                - Feature values:  A NumPy array or list of the grid points along the feature dimension.
-                - ALE values: A NumPy array or list of the corresponding ALE values for each grid point.
+            A Pandas DataFrame containing the ALE values and corresponding feature values.
         """
         j = self.X.columns.get_loc(var_name)
-        xjks = np.quantile(self.X.iloc[:, j], q=np.arange(0, 1, 1 / n_grid))
+        xjks = np.linspace(self.X.iloc[:, j].min(), self.X.iloc[:, j].max(), n_grid + 1)
         local_effects = np.zeros(n_grid)
-        for k in range(1, n_grid):
-            mask = (self.X.iloc[:, j] >= xjks[k - 1]) & (self.X.iloc[:, j] <= xjks[k])
-            local_effects[k] = self._predict_average(
-                self.X[mask], j, xjks[k]
-            ) - self._predict_average(self.X[mask], j, xjks[k - 1])
+
+        for k in range(n_grid):
+            mask = (self.X.iloc[:, j] >= xjks[k]) & (self.X.iloc[:, j] < xjks[k + 1])
+            if not self.X[mask].empty:
+                local_effects[k] = self._predict_average(
+                    self.X[mask], j, xjks[k + 1]
+                ) - self._predict_average(self.X[mask], j, xjks[k])
 
         accumulated_local_effects = np.cumsum(local_effects)
-        return pd.DataFrame({var_name: xjks, "ale": accumulated_local_effects})
+        ale_df = pd.DataFrame({var_name: xjks[:-1], "ale": accumulated_local_effects})
+        return ale_df
 
     def _predict_average(self, X: pd.DataFrame, j: int, xj: float) -> np.ndarray:
-        """Replaces feature values, performs predictions, and averages the results.
+        """
+        Calculates the average prediction for a given feature value.
 
         Args:
-            j: The index of the feature to be replaced.
+            X: The dataset to make predictions on.
+            j: The index of the feature to replace.
             xj: The value to replace the feature with.
-        """
 
+        Returns:
+            The average prediction.
+        """
+        if X.empty:
+            return 0
         X_replaced = X.copy()
         X_replaced.iloc[:, j] = xj
         return self.model.predict(X_replaced).mean()
 
-    def plot_ale(self, ylim: Union[List[float], None] = None) -> None:
-        """Visualizes Accumulated Local Effects (ALE) plots.
+    def plot_ale(
+        self, var_name: str, df_ale: pd.DataFrame, ylim: Union[List[float], None] = None
+    ):
+        """
+        Plots the Accumulated Local Effects (ALE).
 
         Args:
-            ylim: A tuple (ymin, ymax) specifying the y-axis limits. If None or omitted, the limits will be automatically determined based on the range of the ALE values.
+            var_name: The name of the feature that was used to calculate the ALE.
+            df_ale: The Pandas DataFrame containing the ALE values and feature values.  This DataFrame should be the output of the `accumulated_local_effects` method.
+            ylim: A tuple specifying the y-axis limits (min, max). If None, the limits are automatically determined.
         """
-
         fig, ax = plt.subplots()
-        sns.lineplot(
-            x=self.target_var_name,
-            y="ice_diff",
-            units="instance",
-            data=self.df_ice,
-            lw=0.8,
-            alpha=0.5,
-            estimator=None,
-            zorder=1,
-            ax=ax,
+        sns.lineplot(x=var_name, y="ale", data=df_ale, ax=ax)
+        ax.set(
+            xlabel=var_name, ylabel="ALE", ylim=ylim, title=f"ALE Plot for {var_name}"
         )
-        ax.set(xlabel=self.target_var_name, ylabel="Prediction", ylim=ylim)
-        fig.suptitle(f"Individual Conditional Expectation({self.target_var_name})")
-        fig.show()
+        plt.show()
 
 
 class PermutationFeatureImportance:
+    """Permutation Feature Importance"""
+
     def __init__(
         self,
         model: Any,
@@ -286,6 +289,10 @@ class PermutationFeatureImportance:
         metric: Any,
         pred_type: Literal["regression", "classification"],
     ):
+        """
+        Initializes the PermutationFeatureImportance object.
+
+        """
         self.model = model
         self.X = X.copy()
         self.y = y
@@ -298,9 +305,20 @@ class PermutationFeatureImportance:
         elif hasattr(self.model, "predict_proba"):
             self.baseline = self.metric(self.y, self.model.predict_proba(self.X)[:, 1])
         else:
-            raise AttributeError("Model does not have 'predict_proba' method.")
+            raise AttributeError(
+                "Model does not have 'predict_proba' method.  For classification tasks, ensure your model has this method or specify 'regression' for regression tasks."
+            )
 
     def _permutation_metrics(self, idx_to_permute: int) -> float:
+        """
+        Calculates the metric after permuting a single feature.
+
+        Args:
+            idx_to_permute: The index of the feature to permute.
+
+        Returns:
+            The value of the metric after permuting the feature.
+        """
         X_permuted = self.X.copy()
         X_permuted.iloc[:, idx_to_permute] = np.random.permutation(
             X_permuted.iloc[:, idx_to_permute]
@@ -312,7 +330,19 @@ class PermutationFeatureImportance:
             y_pred = self.model.predict_proba(X_permuted)[:, 1]
         return self.metric(self.y, y_pred)
 
-    def permutation_feature_importance(self, n_shuffle=10, n_jobs=-1) -> pd.DataFrame:
+    def permutation_feature_importance(
+        self, n_shuffle: int = 10, n_jobs: int = -1
+    ) -> pd.DataFrame:
+        """
+        Calculates permutation feature importance.
+
+        Args:
+            n_shuffle: The number of times to shuffle each feature.
+            n_jobs: The number of jobs to run in parallel. -1 means using all processors.
+
+        Returns:
+            A Pandas DataFrame containing the permutation feature importance results, sorted by importance ratio (ascending).
+        """
         J = self.X.shape[1]
         results = []
         for j in range(J):
@@ -332,7 +362,7 @@ class PermutationFeatureImportance:
             - df_feature_importance["baseline"]
         )
         df_feature_importance["ratio"] = (
-            (df_feature_importance["diff"]) / df_feature_importance["baseline"]
+            df_feature_importance["diff"] / df_feature_importance["baseline"]
         )
 
         df_feature_importance_sorted = df_feature_importance.sort_values(
